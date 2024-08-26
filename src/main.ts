@@ -3,7 +3,8 @@ import * as XLSX from "xlsx";
 import fs from "fs";
 
 // Extract the product ID from the product link using a regular expression
-const productLink = "https://www.digikala.com/product/dkp-4170599/%D9%BE%D8%A7%D9%88%D8%B1%D8%A8%D8%A7%D9%86%DA%A9-%D8%A7%DB%8C-%D8%AF%DB%8C%D8%AA%D8%A7-%D9%85%D8%AF%D9%84-p10000qcd-%D8%B8%D9%81%DB%8C%D8%AA-10000-%D9%85%DB%8C%D9%84%DB%8C-%D8%A2%D9%85%D9%BE%D8%B1-%D8%B3%D8%A7%D8%B9%D8%AA/";
+const productLink =
+  "https://www.digikala.com/product/dkp-8366616/%DA%AF%D9%88%D8%B4%DB%8C-%D9%85%D9%88%D8%A8%D8%A7%DB%8C%D9%84-%D8%A7%D9%BE%D9%84-%D9%85%D8%AF%D9%84-iphone-13-ch-%D8%AF%D9%88-%D8%B3%DB%8C%D9%85-%DA%A9%D8%A7%D8%B1%D8%AA-%D8%B8%D8%B1%D9%81%DB%8C%D8%AA-128-%DA%AF%DB%8C%DA%AF%D8%A7%D8%A8%D8%A7%DB%8C%D8%AA-%D9%88-%D8%B1%D9%85-4-%DA%AF%DB%8C%DA%AF%D8%A7%D8%A8%D8%A7%DB%8C%D8%AA-%D9%86%D8%A7%D8%AA-%D8%A7%DA%A9%D8%AA%DB%8C%D9%88/";
 const productIdRegex = /dkp-(\d+)/;
 const productIdMatch = productLink.match(productIdRegex);
 
@@ -26,9 +27,13 @@ const allResponses: any[] = [];
 /**
  * Fetches data for a specific page and stores it in the allResponses array.
  * @param {number} pageNumber - The page number to fetch.
+ * @param {number} [retryCount=0] - The number of retry attempts made.
  * @returns {Promise<number>} - The total number of pages.
  */
-async function fetchAndSavePage(pageNumber: number): Promise<number> {
+async function fetchAndSavePage(
+  pageNumber: number,
+  retryCount = 0
+): Promise<number> {
   const url = `${apiBaseUrl}?page=${pageNumber}`;
   try {
     const response = await axios.get(url, {
@@ -41,15 +46,37 @@ async function fetchAndSavePage(pageNumber: number): Promise<number> {
 
     const { data } = response.data;
 
+    if (!data || !data.comments || data.comments.length === 0) {
+      console.log(`No comments found on page ${pageNumber}. Stopping.`);
+      return 0; // Stop further fetching
+    }
+
     // Collect the response data
     allResponses.push(data);
     console.log(`Data for page ${pageNumber} saved successfully.`);
 
-    // Return total pages from the response for further fetching
-    return data.pager.total_pages;
+    // Check if `pager` exists before accessing it
+    if (data.pager && data.pager.total_pages) {
+      return data.pager.total_pages;
+    } else {
+      console.warn(
+        `No pager information found for page ${pageNumber}. Stopping.`
+      );
+      return 0; // Stop fetching if pager is missing
+    }
   } catch (error) {
     console.error(`Error fetching data for page ${pageNumber}:`, error);
-    return 0; // Stop fetching if an error occurs
+
+    // Retry up to 3 times with delay if an error occurs
+    if (retryCount < 3) {
+      console.log(`Retrying page ${pageNumber}... (${retryCount + 1}/3)`);
+      return fetchAndSavePage(pageNumber, retryCount + 1);
+    }
+
+    console.error(
+      `Failed to fetch data for page ${pageNumber} after 3 retries.`
+    );
+    return 0; // Stop fetching after max retries
   }
 }
 
@@ -64,8 +91,8 @@ async function fetchAllPages(): Promise<void> {
     return;
   }
 
-  // Fetch the remaining pages
-  for (let page = 2; page <= totalPages; page++) {
+  // Fetch the remaining pages, but stop if the page number exceeds 101
+  for (let page = 2; page <= Math.min(totalPages, 101); page++) {
     await fetchAndSavePage(page);
   }
 
